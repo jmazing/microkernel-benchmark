@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -24,52 +26,60 @@ void* thread_function(void* arg) {
 }
 
 int main(int argc, char *argv[]) {
-    printf("Hello world");
-    // int num_threads = DEFAULT_NUM_THREADS;
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
+        perror("sched_setaffinity");
+        exit(EXIT_FAILURE);
+    }
+
+    int num_threads = DEFAULT_NUM_THREADS;
     
-    // // Allow the number of threads to be specified via command line argument
-    // if (argc > 1) {
-    //     num_threads = atoi(argv[1]);
-    //     if (num_threads <= 0) {
-    //         fprintf(stderr, "Invalid number of threads provided. Using default: %d\n", DEFAULT_NUM_THREADS);
-    //         num_threads = DEFAULT_NUM_THREADS;
-    //     }
-    // }
+    // Allow the number of threads to be specified via command line argument
+    if (argc > 1) {
+        num_threads = atoi(argv[1]);
+        if (num_threads <= 0) {
+            fprintf(stderr, "Invalid number of threads provided. Using default: %d\n", DEFAULT_NUM_THREADS);
+            num_threads = DEFAULT_NUM_THREADS;
+        }
+    }
 
-    // // Allocate memory for thread handles and their data
-    // pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
-    // thread_data_t *thread_data = malloc(num_threads * sizeof(thread_data_t));
-    // if (!threads || !thread_data) {
-    //     perror("malloc");
-    //     exit(EXIT_FAILURE);
-    // }
+    // Allocate memory for thread handles and their data
+    pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+    thread_data_t *thread_data = malloc(num_threads * sizeof(thread_data_t));
+    if (!threads || !thread_data) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
 
-    // // Create the threads
-    // for (int i = 0; i < num_threads; i++) {
-    //     thread_data[i].thread_id = i;
-    //     thread_data[i].iterations = 0;
-    //     if (pthread_create(&threads[i], NULL, thread_function, (void*)&thread_data[i]) != 0) {
-    //         perror("pthread_create");
-    //         exit(EXIT_FAILURE);
-    //     }
-    // }
+    // Create the threads
+    for (int i = 0; i < num_threads; i++) {
+        thread_data[i].thread_id = i;
+        thread_data[i].iterations = 0;
+        if (pthread_create(&threads[i], NULL, thread_function, (void*)&thread_data[i]) != 0) {
+            perror("pthread_create");
+            exit(EXIT_FAILURE);
+        }
+    }
 
-    // // Let the threads run for 2 seconds
-    // sleep(2);
-    // stop = 1;
+    // Let the threads run for 5 seconds
+    // make this configurable
+    sleep(5);
+    stop = 1;
 
-    // // Wait for all threads to finish
-    // for (int i = 0; i < num_threads; i++) {
-    //     pthread_join(threads[i], NULL);
-    // }
+    // Wait for all threads to finish
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], NULL);
+    }
 
-    // // Report the results
-    // printf("Thread Fairness Test Results (2 seconds run):\n");
-    // for (int i = 0; i < num_threads; i++) {
-    //     printf("Thread %d: %lu iterations\n", thread_data[i].thread_id, thread_data[i].iterations);
-    // }
+    // Report the results
+    printf("Thread Fairness Test Results (2 seconds run):\n");
+    for (int i = 0; i < num_threads; i++) {
+        printf("Thread %d: %lu iterations\n", thread_data[i].thread_id, thread_data[i].iterations);
+    }
 
-    // free(threads);
-    // free(thread_data);
-    // return 0;
+    free(threads);
+    free(thread_data);
+    return 0;
 }
