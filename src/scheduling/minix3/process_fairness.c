@@ -2,8 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sched.h>
 
 #define DEFAULT_NUM_PROCESSES 4
 #define TEST_DURATION 2  // Test duration in seconds
@@ -15,6 +17,8 @@ typedef struct {
 } shared_data_t;
 
 int main(int argc, char *argv[]) {
+#ifdef __linux__
+    // Enforce execution on a single CPU (CPU 0)
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(0, &cpuset);
@@ -22,6 +26,7 @@ int main(int argc, char *argv[]) {
         perror("sched_setaffinity");
         exit(EXIT_FAILURE);
     }
+#endif
     
     int num_processes = DEFAULT_NUM_PROCESSES;
     if (argc > 1) {
@@ -31,13 +36,20 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Allocate shared memory for the stop flag and per-process counters.
+    // Allocate shared memory using /dev/zero (since MAP_ANONYMOUS isn't available)
     size_t size = sizeof(shared_data_t) + num_processes * sizeof(unsigned long);
-    shared_data_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    int fd = open("/dev/zero", O_RDWR);
+    if (fd < 0) {
+        perror("open /dev/zero");
+        exit(EXIT_FAILURE);
+    }
+    shared_data_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (data == MAP_FAILED) {
         perror("mmap");
         exit(EXIT_FAILURE);
     }
+    close(fd);
+
     data->stop = 0;
     for (int i = 0; i < num_processes; i++) {
         data->counters[i] = 0;
