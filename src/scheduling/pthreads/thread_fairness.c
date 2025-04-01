@@ -26,6 +26,7 @@ void* thread_function(void* arg) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef __linux__  
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(0, &cpuset);
@@ -33,6 +34,7 @@ int main(int argc, char *argv[]) {
         perror("sched_setaffinity");
         exit(EXIT_FAILURE);
     }
+#endif
 
     int num_threads = DEFAULT_NUM_THREADS;
     

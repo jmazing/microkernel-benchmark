@@ -6,9 +6,10 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <sched.h>
+#include <string.h>
 
 #define DEFAULT_NUM_PROCESSES 4
-#define TEST_DURATION 2  // Test duration in seconds
+#define TEST_DURATION 2  // Duration of test in seconds
 
 // Shared memory structure with a stop flag and a flexible array for counters.
 typedef struct {
@@ -17,7 +18,7 @@ typedef struct {
 } shared_data_t;
 
 int main(int argc, char *argv[]) {
-#ifdef __linux__
+    #ifdef __linux__
     // Enforce execution on a single CPU (CPU 0)
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -26,7 +27,7 @@ int main(int argc, char *argv[]) {
         perror("sched_setaffinity");
         exit(EXIT_FAILURE);
     }
-#endif
+    #endif
     
     int num_processes = DEFAULT_NUM_PROCESSES;
     if (argc > 1) {
@@ -36,26 +37,44 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Allocate shared memory using /dev/zero (since MAP_ANONYMOUS isn't available)
+    // Calculate size for the shared memory region.
     size_t size = sizeof(shared_data_t) + num_processes * sizeof(unsigned long);
-    int fd = open("/dev/zero", O_RDWR);
+
+    // Create a temporary file to back the shared memory region.
+    char template[] = "/tmp/shmXXXXXX";
+    int fd = mkstemp(template);
     if (fd < 0) {
-        perror("open /dev/zero");
+        perror("mkstemp");
         exit(EXIT_FAILURE);
     }
+    // Unlink the file so it is removed after closing.
+    if (unlink(template) < 0) {
+        perror("unlink");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+    // Resize the file to the desired size.
+    if (ftruncate(fd, size) < 0) {
+        perror("ftruncate");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+    // Map the file into memory.
     shared_data_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (data == MAP_FAILED) {
         perror("mmap");
+        close(fd);
         exit(EXIT_FAILURE);
     }
     close(fd);
 
+    // Initialize the shared memory.
     data->stop = 0;
     for (int i = 0; i < num_processes; i++) {
         data->counters[i] = 0;
     }
 
-    // Array to store child process IDs.
+    // Allocate an array to store child process IDs.
     pid_t *child_pids = malloc(num_processes * sizeof(pid_t));
     if (child_pids == NULL) {
         perror("malloc");
@@ -69,18 +88,17 @@ int main(int argc, char *argv[]) {
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0) {
-            // Child process: continuously increment its own counter.
+            // Child process: increment its designated counter until the stop flag is set.
             while (!data->stop) {
                 data->counters[i]++;
             }
             exit(EXIT_SUCCESS);
         } else {
-            // Parent process: record child PID.
             child_pids[i] = pid;
         }
     }
 
-    // Let the children run for the specified test duration.
+    // Let the child processes run for the specified test duration.
     sleep(TEST_DURATION);
     data->stop = 1;
 
