@@ -26,8 +26,11 @@ THREAD_FAIRNESS_EXE = $(BIN_DIR)/thread_fairness
 # Define the executable target for process_fairness
 PROCESS_FAIRNESS_EXE = $(BIN_DIR)/process_fairness
 
+# Define the executable target for process_fairness
+SLEEP_WAKE_PROCESS_EXE = $(BIN_DIR)/sleep_wake_process
+
 # Default target builds object files and links the executable
-all: $(BIN_DIR) $(OBJ_SUBDIRS) $(OBJ) $(THREAD_FAIRNESS_EXE) $(PROCESS_FAIRNESS_EXE)
+all: $(BIN_DIR) $(OBJ_SUBDIRS) $(OBJ) $(THREAD_FAIRNESS_EXE) $(PROCESS_FAIRNESS_EXE) $(SLEEP_WAKE_PROCESS_EXE)
 
 # Create required directories
 $(BIN_DIR):
@@ -45,6 +48,10 @@ $(THREAD_FAIRNESS_EXE): $(OBJ_DIR)/scheduling/pthreads/thread_fairness.o
 
 # Linking rule for process_fairness executable
 $(PROCESS_FAIRNESS_EXE): $(OBJ_DIR)/scheduling/minix3/process_fairness.o
+	$(GCC) $(CFLAGS) $^ -o $@
+
+# Linking rule for process_fairness executable
+$(SLEEP_WAKE_PROCESS_EXE): $(OBJ_DIR)/scheduling/minix3/sleep_wake_process.o
 	$(GCC) $(CFLAGS) $^ -o $@
 
 # Include dependency files
