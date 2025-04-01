@@ -4,6 +4,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>
 
 #define DEFAULT_NUM_SLEEP_THREADS 2
 #define DEFAULT_NUM_LOAD_THREADS 2

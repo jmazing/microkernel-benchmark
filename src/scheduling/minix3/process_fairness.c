@@ -1,22 +1,15 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/time.h>
+#include <sched.h>
 
 #define NUM_PROCS 10   /* Number of child processes */
 #define RUN_TIME 5     /* Run time in seconds for each child */
 
 int main(void) {
-#ifdef __linux__
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(0, &cpuset);
-    if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
-        perror("sched_setaffinity");
-        exit(EXIT_FAILURE);
-    }
-#endif
 
     int pipefd[NUM_PROCS][2];
     pid_t pids[NUM_PROCS];
