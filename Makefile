@@ -23,11 +23,11 @@ OBJ = $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 # Define the executable target for thread_fairness
 THREAD_FAIRNESS_EXE = $(BIN_DIR)/thread_fairness
 
-fast: all
-	@$(MAKE) --no-print-directory -j$(nproc) all
+# Define the executable target for process_fairness
+PROCESS_FAIRNESS_EXE = $(BIN_DIR)/process_fairness
 
 # Default target builds object files and links the executable
-all: $(BIN_DIR) $(OBJ_SUBDIRS) $(OBJ) $(THREAD_FAIRNESS_EXE)
+all: $(BIN_DIR) $(OBJ_SUBDIRS) $(OBJ) $(THREAD_FAIRNESS_EXE) $(PROCESS_FAIRNESS_EXE)
 
 # Create required directories
 $(BIN_DIR):
@@ -40,7 +40,11 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_SUBDIRS)
 	$(GCC) $(CFLAGS) $(INCLUDE_DIRS) -MMD -c $< -o $@
 
 # Linking rule for thread_fairness executable
-$(THREAD_FAIRNESS_EXE): $(OBJ_DIR)/scheduling/thread_fairness.o
+$(THREAD_FAIRNESS_EXE): $(OBJ_DIR)/scheduling/pthreads/thread_fairness.o
+	$(GCC) $(CFLAGS) $^ -o $@
+
+# Linking rule for process_fairness executable
+$(PROCESS_FAIRNESS_EXE): $(OBJ_DIR)/scheduling/minix3/process_fairness.o
 	$(GCC) $(CFLAGS) $^ -o $@
 
 # Include dependency files
