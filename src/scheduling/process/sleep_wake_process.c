@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/resource.h>
 
 #define DEFAULT_NUM_SLEEP_PROCS 2
 #define DEFAULT_NUM_LOAD_PROCS  2
@@ -113,6 +114,17 @@ int main(int argc, char *argv[]) {
     CPU_SET(0, &cpuset);
     if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
         perror("sched_setaffinity");
+        exit(EXIT_FAILURE);
+    }
+
+    // use only 512 mb of memory
+    struct rlimit mem_limit;
+    // Set both soft and hard limits to 512 MB.
+    mem_limit.rlim_cur = 512UL * 1024 * 1024;
+    mem_limit.rlim_max = 512UL * 1024 * 1024;
+    
+    if (setrlimit(RLIMIT_AS, &mem_limit) != 0) {
+        perror("setrlimit");
         exit(EXIT_FAILURE);
     }
 #endif

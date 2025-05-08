@@ -1,7 +1,7 @@
 {
     "files.associations": {
-        "unistd.h": "c",
-        "time.h": "c",
-        "sched.h": "c"
+        "resource.h": "c",
+        "stdlib.h": "c",
+        "mman.h": "c"
     }
 }

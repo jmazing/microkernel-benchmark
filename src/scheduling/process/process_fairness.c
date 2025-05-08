@@ -5,12 +5,13 @@
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <sched.h>
+#include <sys/resource.h>
 
 #define NUM_PROCS 10   /* Number of child processes */
 #define RUN_TIME 5     /* Run time in seconds for each child */
 
 int main(void) {
-
+    
     int pipefd[NUM_PROCS][2];
     pid_t pids[NUM_PROCS];
     unsigned long long counts[NUM_PROCS];
