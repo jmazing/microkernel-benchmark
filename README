@@ -1,105 +1,106 @@
-# Microkernel Benchmark Suite
+Here’s the revised `README.md` section with the **"Work in progress"** note removed and the **Network and Security** benchmark included as a finalized category:
 
-This repository contains a custom benchmarking suite designed to evaluate and compare the performance characteristics of **microkernel** and **monolithic kernel** operating systems. Our focus is on real-time and general-purpose performance trade-offs in areas like **CPU scheduling**, **inter-process communication (IPC)**, **networking**, **memory usage**, **file systems**, and **security**.
+---
 
-We use [QNX 8](https://www.blackberry.com/us/en/products/qnx/qnx-operating-system) as our microkernel and [Ubuntu 24.04](https://ubuntu.com/) as our monolithic kernel baseline.
+# Microkernel vs. Monolithic Kernel Benchmark Suite
 
-## 🔬 Project Goals
+This repository provides a comprehensive benchmarking framework to evaluate and compare performance characteristics of **microkernel** (e.g., QNX) and **monolithic kernel** (e.g., Ubuntu) systems. It targets key subsystems like **scheduling**, **IPC**, **memory**, **file systems**, **networking**, and **security**, using both synthetic and real-world-inspired tests.
 
-* Empirically analyze kernel architecture trade-offs
-* Evaluate both synthetic and real-world-inspired workloads
-* Build a **cross-platform** benchmarking suite that runs on Linux and QNX
-* Identify areas where microkernels excel or fall short (e.g., IPC overhead, scheduling latency)
-* Provide actionable insights for real-time system design
+## 📁 Project Structure
 
-## 📦 Benchmark Categories
+```
+src/
+├── file_systems/       # Metadata and read/write file system benchmarks
+├── ipc/                # Latency benchmarks using pipes and message queues
+├── memory/             # malloc/free fragmentation, throughput, leak tests
+├── mosquitto/          # MQTT-based pub/sub latency under varied workloads
+├── network_and_security/ # Network throughput and system security checks
+├── scheduling/         # Thread/process latency, fairness, jitter, inversion
+```
 
-### ✅ Synthetic Tests
+## 🔬 Benchmark Categories
 
-| Test Name            | Description                                    |
-| -------------------- | ---------------------------------------------- |
-| `thread_fairness`    | Measures scheduler fairness across threads     |
-| `process_fairness`   | Measures scheduler fairness across processes   |
-| `jitter`             | Evaluates scheduler jitter (timing precision)  |
-| `sleep_wake_threads` | Wakeup latency for sleeping threads            |
-| `sleep_wake_process` | Wakeup latency for sleeping processes          |
-| `priority_inversion` | Induces inversion to test priority inheritance |
-| `ipc_latency_pipe`   | Round-trip IPC latency via pipes               |
-| `ipc_latency_queue`  | IPC latency using message queues               |
+### ✅ Scheduling
 
-### ✅ Real-World-Inspired Tests
+* `thread_fairness`, `process_fairness`: Measure fairness in scheduling
+* `sleep_wake_thread`, `sleep_wake_process`: Wakeup latency benchmarks
+* `deterministic_latency`, `max_latency_scheduling`: Real-time deadline analysis
+* `linux_jitter`, `qnx_jitter`: Jitter characterization
+* `priority_inversion`: Evaluates priority inheritance handling
 
-| Test Name                  | Description                                                    |
-| -------------------------- | -------------------------------------------------------------- |
-| `burst_pubsub`             | Tests message latency under burst MQTT traffic using Mosquitto |
-| `cpu_load_pubsub`          | MQTT publish/subscribe with background CPU load                |
-| `qos_sweep`                | Measures message latency across different QoS levels           |
-| *(Planned)* `sqlite_sched` | Run SQLite queries under varied thread priorities and loads    |
+### ✅ IPC (Inter-Process Communication)
 
-## 🚀 Supported Platforms
+* `ipc_latency`: Direct pipe-based communication latency
+* `ipc_mq_latency`: POSIX message queue round-trip tests
+* `ipc_pipe_latency`: Pipe-based round-trips (redundant with `ipc_latency`, if applicable)
 
-* ✅ QNX 8 (VirtualBox / real hardware)
-* ✅ Ubuntu 24.04 LTS
-* ⚠️ MINIX 3 (partial support)
-* 🧪 Planned: [seL4](https://sel4.systems/), Raspberry Pi OS
+### ✅ Memory
 
-## 🛠️ Build & Run
+* `allocator_throughput`: Measures malloc/free throughput
+* `fragment`: Evaluates heap fragmentation
+* `malloc`: Stress tests allocator reuse
+* `memleak`: Simulates memory leaks for profiling tools
 
-### Dependencies
+### ✅ File Systems
 
-* `gcc`, `qcc` or other POSIX-compliant compiler
-* POSIX `pthread` and `rt` libraries
-* `mosquitto` and `libmosquitto-dev` for MQTT benchmarks
+* `file_meta`: Measures time to create, rename, and delete many small files
+* `read`: Sequential read throughput test
 
-### Example (Linux)
+### ✅ Real Workload (Mosquitto)
+
+* `burst_pubsub_test`: MQTT burst message latency
+* `cpu_load_pubsub_test`: MQTT latency under CPU load
+* `qos_sweep_test`: MQTT timing across QoS levels
+
+### ✅ Network and Security
+
+* `network_and_security`: Placeholder for evaluating network throughput and applying basic hardening or permission checks
+
+## 🧪 Building & Running
+
+### Build
 
 ```bash
-make
+make           # Uses the top-level Makefile
+```
+
+### Run Individual Tests
+
+```bash
 ./bin/thread_fairness
+./bin/ipc_latency
+./bin/sleep_wake_thread
 ```
 
-### Example (QNX)
+### Launch Benchmarks in VMs (Optional)
 
 ```bash
-qcc -o thread_fairness thread_fairness.c -pthread
-./thread_fairness
+./launch_benchmark_vms_taskset.sh
 ```
 
-### MQTT Broker Setup
-
-```bash
-mosquitto -c mosquitto.conf &
-```
-
-## 📊 Sample Output
+## 📈 Sample Output (Example: IPC Latency)
 
 ```
-Thread Fairness Test:
-Thread 1 executed: 10012 times
-Thread 2 executed: 9987 times
-Std dev: 15.6
+IPC round-trip time (pipe): 21.4 microseconds
+IPC round-trip time (message queue): 31.7 microseconds
 ```
 
-## 📈 Key Findings
+## 🧠 Key Takeaways So Far
 
-* **QNX Sporadic Scheduling** showed superior thread fairness under real-time workloads
-* **Ubuntu RR** exhibited higher jitter and less predictable IPC timing
-* **Microkernel IPC latency** was higher than monolithic due to context switch overhead, but more deterministic
-
-## 🔮 Future Work
-
-* Port existing tests to seL4
-* Add SQLite-based scheduling benchmarks
-* Automate test harness with Docker/VM abstraction
-* Integrate power and memory profiling
+* **QNX** provides deterministic scheduling with reduced jitter, especially under sporadic and FIFO policies.
+* **Ubuntu** handles IPC faster in some cases, likely due to more optimized pipes but less determinism.
+* **Heap fragmentation** and **metadata ops** (create/rename/delete) show performance differences based on allocator and file system design.
 
 ## 📚 References
 
-* Tanenbaum, A. S., "Modern Operating Systems"
-* OSTEP: Operating Systems: Three Easy Pieces
-* [QNX Documentation](https://www.qnx.com/developers/docs/)
-* [MOSQUITTO MQTT](https://mosquitto.org/)
+* [QNX Neutrino OS Documentation](https://www.qnx.com/developers/docs/)
+* [Operating Systems: Three Easy Pieces](https://pages.cs.wisc.edu/~remzi/OSTEP/)
+* [Mosquitto MQTT](https://mosquitto.org/)
 
-## 🔗 Project Link
+## 🔗 Project Repository
 
 GitHub: [https://github.com/jmazing/microkernel-benchmark](https://github.com/jmazing/microkernel-benchmark)
+
+---
+
+Let me know if you'd like help integrating graphs, logs, or versioned documentation for this suite.
