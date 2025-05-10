@@ -1,6 +1,3 @@
-Here’s the revised `README.md` section with the **"Work in progress"** note removed and the **Network and Security** benchmark included as a finalized category:
-
----
 
 # Microkernel vs. Monolithic Kernel Benchmark Suite
 
@@ -104,3 +101,70 @@ GitHub: [https://github.com/jmazing/microkernel-benchmark](https://github.com/jm
 ---
 
 Let me know if you'd like help integrating graphs, logs, or versioned documentation for this suite.
+
+
+## 🔧 Building and Running Tests
+
+Each test can be compiled using either `gcc` (Linux) or `qcc` (QNX). Mosquitto-based tests require linking against a static `libmosquitto_static` library (provided in `resources/mosquitto/`).
+
+### 📦 Compilation Examples
+
+#### Linux (GCC)
+```bash
+gcc -O2 -o bin/thread_fairness src/scheduling/threads/thread_fairness.c -pthread
+gcc -O2 -o bin/ipc_latency src/ipc/ipc_latency.c -lrt -pthread
+gcc -O2 -o bin/burst_pubsub_test src/mosquitto/burst_pubsub_test.c \
+    resources/mosquitto/libmosquitto_static_linux.a -lrt -pthread
+```
+
+#### QNX (QCC)
+```bash
+qcc -Vgcc_ntox86_64 -o bin/thread_fairness src/scheduling/threads/thread_fairness.c -pthread
+qcc -Vgcc_ntox86_64 -o bin/ipc_latency src/ipc/ipc_latency.c -lrt -pthread
+qcc -Vgcc_ntox86_64 -o bin/burst_pubsub_test src/mosquitto/burst_pubsub_test.c \
+    resources/mosquitto/libmosquitto_static_qnx.a -lrt -pthread
+```
+
+> ⚠️ Ensure you use the correct `libmosquitto_static_*.a` based on platform.
+
+---
+
+### 🚚 Transferring Binaries to VMs
+
+To run tests inside your virtual machines, you must copy the binaries via `scp`:
+
+#### 📤 From Host to QNX VM:
+```bash
+scp bin/thread_fairness root@192.168.x.x:/tmp/
+```
+
+#### 📤 From Host to Ubuntu VM:
+```bash
+scp bin/ipc_latency user@192.168.x.x:/home/user/
+```
+
+> ✅ Tip: Ensure your VMs are on bridged or host-only networking to accept `scp` connections.
+
+
+## 🛠 Installing QNX and QCC
+
+### ✅ QNX Installation (VirtualBox ISO)
+
+QNX installation: https://www.qnx.com/developers/docs/8.0/com.qnx.doc.qnxsdp.quickstart/topic/install_host.html
+
+---
+
+### 🧰 Installing QCC (QNX Compiler)
+
+1. After booting into QNX, open a terminal or use the system shell.
+2. Ensure `/usr/bin/qcc` is in your path:
+```bash
+export PATH=$PATH:/usr/qnx800/host/linux/x86_64/usr/bin
+```
+3. Confirm `qcc` is working:
+```bash
+qcc -Vgcc_ntox86_64
+```
+You should see compiler version output.
+
+> ✅ Note: If you're compiling from Linux but targeting QNX, install the **QNX SDP on Linux** and build using the QNX-hosted cross-toolchain.
