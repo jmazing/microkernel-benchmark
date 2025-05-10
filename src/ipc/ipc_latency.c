@@ -13,7 +13,6 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/time.h>
-#include <sched.h>
 #include <sys/resource.h>
 
 #define NSEC_PER_SEC 1000000000L
@@ -22,7 +21,8 @@
 #define MSG_SIZE     64
 #define NUM_LOAD_THREADS 3
 
-// Helper: add nanoseconds to a timespec (not used here, but available)
+int sched_policy = SCHED_FIFO;
+
 struct timespec timespec_add(struct timespec t, long ns) {
     t.tv_nsec += ns;
     if (t.tv_nsec >= NSEC_PER_SEC) {
@@ -32,29 +32,46 @@ struct timespec timespec_add(struct timespec t, long ns) {
     return t;
 }
 
-// Helper: compute the difference in nanoseconds between two timespecs
 long timespec_diff_ns(struct timespec end, struct timespec start) {
     return (end.tv_sec - start.tv_sec) * NSEC_PER_SEC + (end.tv_nsec - start.tv_nsec);
 }
 
-// Background load: busy loop to stress the CPU
 void *load_thread_func(void *arg) {
     volatile unsigned long counter = 0;
     while (1) {
-        counter++;  // busy work
+        counter++;
     }
     return NULL;
 }
 
-int main() {
-    mqd_t mq;
-    struct mq_attr attr;
-    attr.mq_flags = 0;
-    attr.mq_maxmsg = 10;
-    attr.mq_msgsize = MSG_SIZE;
-    attr.mq_curmsgs = 0;
+int parse_sched_policy(const char *arg) {
+    if (strcmp(arg, "fifo") == 0) return SCHED_FIFO;
+    if (strcmp(arg, "rr") == 0) return SCHED_RR;
+#ifdef __QNX__
+    if (strcmp(arg, "sporadic") == 0) return SCHED_SPORADIC;
+#else
+    if (strcmp(arg, "sporadic") == 0) {
+        fprintf(stderr, "SCHED_SPORADIC not supported on Linux.\n");
+        exit(EXIT_FAILURE);
+    }
+#endif
+    fprintf(stderr, "Unknown policy: %s\n", arg);
+    exit(EXIT_FAILURE);
+}
 
-    // Ensure any previous instance is removed.
+int main(int argc, char *argv[]) {
+    if (argc > 1) {
+        sched_policy = parse_sched_policy(argv[1]);
+    }
+
+    mqd_t mq;
+    struct mq_attr attr = {
+        .mq_flags = 0,
+        .mq_maxmsg = 10,
+        .mq_msgsize = MSG_SIZE,
+        .mq_curmsgs = 0
+    };
+
     mq_unlink(QUEUE_NAME);
     mq = mq_open(QUEUE_NAME, O_CREAT | O_RDWR, 0644, &attr);
     if (mq == (mqd_t)-1) {
@@ -62,11 +79,10 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Create background load threads to stress the system.
     pthread_t load_threads[NUM_LOAD_THREADS];
     for (int i = 0; i < NUM_LOAD_THREADS; i++) {
         if (pthread_create(&load_threads[i], NULL, load_thread_func, NULL) != 0) {
-            perror("pthread_create for load thread");
+            perror("pthread_create");
             exit(EXIT_FAILURE);
         }
     }
@@ -78,14 +94,12 @@ int main() {
         mq_unlink(QUEUE_NAME);
         exit(EXIT_FAILURE);
     } else if (pid == 0) {
-        // Child process acts as an echo server.
         char buffer[MSG_SIZE];
         for (int i = 0; i < ITERATIONS; i++) {
             if (mq_receive(mq, buffer, MSG_SIZE, NULL) == -1) {
                 perror("mq_receive in child");
                 exit(EXIT_FAILURE);
             }
-            // Immediately echo the message back.
             if (mq_send(mq, buffer, strlen(buffer) + 1, 0) == -1) {
                 perror("mq_send in child");
                 exit(EXIT_FAILURE);
@@ -94,27 +108,44 @@ int main() {
         mq_close(mq);
         exit(EXIT_SUCCESS);
     } else {
-        // Parent process: sends messages and measures round-trip latency.
+        // Set real-time scheduling for the parent
+        int prio = sched_get_priority_max(sched_policy);
+        struct sched_param param = { .sched_priority = prio };
+
+#ifdef __QNX__
+        if (sched_policy == SCHED_SPORADIC) {
+            struct sched_param_sporadic sps = {
+                .sched_priority = prio,
+                .sched_ss_low_priority = 10,
+                .sched_ss_max_repl = 5,
+                .sched_ss_repl_period = { 0, 50000000 },
+                .sched_ss_init_budget = { 0, 5000000 }
+            };
+            if (sched_setscheduler(0, sched_policy, (struct sched_param *)&sps) != 0) {
+                perror("sched_setscheduler (sporadic)");
+            }
+        } else
+#endif
+        {
+            if (sched_setscheduler(0, sched_policy, &param) != 0) {
+                perror("sched_setscheduler");
+            }
+        }
+
+        // Measure round-trip latency
         struct timespec start, end;
         long max_latency = 0;
         char buffer[MSG_SIZE];
         snprintf(buffer, MSG_SIZE, "ping");
 
-        // Set real-time scheduling for the parent process.
-        struct sched_param param;
-        param.sched_priority = 80; // Adjust priority as needed.
-        if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-            perror("sched_setscheduler in parent");
-        }
-
         for (int i = 0; i < ITERATIONS; i++) {
             clock_gettime(CLOCK_MONOTONIC, &start);
             if (mq_send(mq, buffer, strlen(buffer) + 1, 0) == -1) {
-                perror("mq_send in parent");
+                perror("mq_send");
                 break;
             }
             if (mq_receive(mq, buffer, MSG_SIZE, NULL) == -1) {
-                perror("mq_receive in parent");
+                perror("mq_receive");
                 break;
             }
             clock_gettime(CLOCK_MONOTONIC, &end);
@@ -123,16 +154,20 @@ int main() {
                 max_latency = latency;
         }
 
-        printf("Max IPC round-trip latency observed: %ld ns\n", max_latency);
+        const char *policy_str = (sched_policy == SCHED_FIFO) ? "FIFO" :
+                                 (sched_policy == SCHED_RR)   ? "RR" :
+                                 "SPORADIC";
+        printf("Max IPC round-trip latency (%s): %ld ns\n", policy_str, max_latency);
 
-        // Cleanup: kill child process and load threads.
         kill(pid, SIGKILL);
         for (int i = 0; i < NUM_LOAD_THREADS; i++) {
             pthread_cancel(load_threads[i]);
             pthread_join(load_threads[i], NULL);
         }
+
         mq_close(mq);
         mq_unlink(QUEUE_NAME);
     }
+
     return 0;
 }

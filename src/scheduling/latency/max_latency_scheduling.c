@@ -7,6 +7,8 @@
 #include <time.h>
 #include <sched.h>
 #include <sys/resource.h>
+#include <string.h>
+#include <errno.h>
 
 #define NSEC_PER_SEC 1000000000L
 #define PERIOD_NS    1000000L  // 1 ms period
@@ -27,9 +29,26 @@ long timespec_diff_ns(struct timespec end, struct timespec start) {
     return (end.tv_sec - start.tv_sec) * NSEC_PER_SEC + (end.tv_nsec - start.tv_nsec);
 }
 
-int main() {
+int parse_sched_policy(const char *arg) {
+    if (strcmp(arg, "fifo") == 0) return SCHED_FIFO;
+    if (strcmp(arg, "rr") == 0) return SCHED_RR;
+#ifdef __QNX__
+    if (strcmp(arg, "sporadic") == 0) return SCHED_SPORADIC;
+#endif
+    fprintf(stderr, "Unsupported or unknown policy: %s\n", arg);
+    exit(EXIT_FAILURE);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s [fifo|rr|sporadic]\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    int policy = parse_sched_policy(argv[1]);
+    int prio = sched_get_priority_max(policy);
+
 #ifdef __linux__
-    // Optional: pin the process to CPU 0 to reduce variability.
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(15, &cpuset);
@@ -38,51 +57,56 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // use only 512 mb of memory
     struct rlimit mem_limit;
-    // Set both soft and hard limits to 512 MB.
     mem_limit.rlim_cur = 512UL * 1024 * 1024;
     mem_limit.rlim_max = 512UL * 1024 * 1024;
-    
     if (setrlimit(RLIMIT_AS, &mem_limit) != 0) {
         perror("setrlimit");
         exit(EXIT_FAILURE);
     }
 #endif
 
-    struct timespec next, now;
-    long max_latency = 0;
-    int i;
+    struct sched_param param = { .sched_priority = prio };
 
-    // Set high priority scheduling: SCHED_FIFO is ideal for real-time tasks.
-    struct sched_param param;
-    param.sched_priority = 80; // Choose a high, but safe, priority value.
-    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
-        perror("sched_setscheduler");
-        // Continue even if setting real-time priority fails.
+#ifdef __QNX__
+    if (policy == SCHED_SPORADIC) {
+        struct sched_param_sporadic sps = {
+            .sched_priority = prio,
+            .sched_ss_low_priority = 10,
+            .sched_ss_max_repl = 5,
+            .sched_ss_repl_period = { 0, 50000000 }, // 50 ms
+            .sched_ss_init_budget = { 0, 5000000 }   // 5 ms
+        };
+        if (sched_setscheduler(0, policy, (struct sched_param *)&sps) != 0) {
+            perror("sched_setscheduler (sporadic)");
+            exit(EXIT_FAILURE);
+        }
+    } else
+#endif
+    {
+        if (sched_setscheduler(0, policy, &param) != 0) {
+            perror("sched_setscheduler");
+            // Proceed anyway
+        }
     }
 
-    // Get current time and set the first deadline.
+    struct timespec next, now;
+    long max_latency = 0;
+
     clock_gettime(CLOCK_MONOTONIC, &next);
     next = timespec_add(next, PERIOD_NS);
 
-    for (i = 0; i < ITERATIONS; i++) {
-        // Sleep until the next deadline
+    for (int i = 0; i < ITERATIONS; i++) {
         if (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL) != 0) {
             perror("clock_nanosleep");
         }
 
-        // Measure actual wake time.
         clock_gettime(CLOCK_MONOTONIC, &now);
-
-        // Calculate absolute latency: the difference between expected and actual wake time.
         long latency = timespec_diff_ns(now, next);
         if (latency < 0) latency = -latency;
-
         if (latency > max_latency)
             max_latency = latency;
 
-        // Set the next deadline.
         next = timespec_add(next, PERIOD_NS);
     }
 

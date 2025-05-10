@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,9 +9,9 @@
 #include <pthread.h>
 #include <sched.h>
 #include <limits.h>
-#include <sys/mman.h>    // for mlockall
+#include <sys/mman.h>
 #ifdef __QNX__
-#include <sys/neutrino.h> // for ThreadCtl
+#include <sys/neutrino.h>
 #endif
 #include <mosquitto.h>
 
@@ -18,8 +19,8 @@
 #define CONF_FILE    "mosquitto.conf"
 #define BROKER_HOST  "127.0.0.1"
 #define TOPIC        "test/topic"
-#define COUNT        100  // scale as needed
-#define LOAD_PROCS   2    // number of busy-loop children
+#define COUNT        100
+#define LOAD_PROCS   2
 
 static pid_t broker_pid = 0;
 static pid_t load_pids[LOAD_PROCS];
@@ -29,16 +30,15 @@ static int recv_count = 0;
 static pthread_mutex_t recv_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t recv_cond   = PTHREAD_COND_INITIALIZER;
 
-// get monotonic timestamp ns
-static long long now_ns() {
+int sched_policy = SCHED_OTHER;
+
+long long now_ns() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-// Mosquitto callback runs on subscriber thread
-static void on_message(struct mosquitto *mosq, void *obj,
-                       const struct mosquitto_message *msg) {
+void on_message(struct mosquitto *mosq, void *obj, const struct mosquitto_message *msg) {
     if (recv_count < COUNT) {
         recv_times[recv_count++] = now_ns();
         if (recv_count == COUNT) {
@@ -49,7 +49,22 @@ static void on_message(struct mosquitto *mosq, void *obj,
     }
 }
 
-static void start_broker() {
+int parse_sched_policy(const char *arg) {
+    if (strcmp(arg, "fifo") == 0) return SCHED_FIFO;
+    if (strcmp(arg, "rr") == 0) return SCHED_RR;
+#ifdef __QNX__
+    if (strcmp(arg, "sporadic") == 0) return SCHED_SPORADIC;
+#else
+    if (strcmp(arg, "sporadic") == 0) {
+        fprintf(stderr, "SCHED_SPORADIC not supported on Linux.\n");
+        exit(EXIT_FAILURE);
+    }
+#endif
+    fprintf(stderr, "Unknown scheduling policy: %s\n", arg);
+    exit(EXIT_FAILURE);
+}
+
+void start_broker() {
     broker_pid = fork();
     if (broker_pid == 0) {
         execlp(BROKER_CMD, BROKER_CMD, "-c", CONF_FILE, NULL);
@@ -59,46 +74,52 @@ static void start_broker() {
     sleep(1);
 }
 
-static void stop_broker() {
+void stop_broker() {
     if (broker_pid > 0) {
         kill(broker_pid, SIGTERM);
         waitpid(broker_pid, NULL, 0);
     }
 }
 
-static void run_test(const char *label) {
+void run_test(const char *label) {
     printf("\n=== %s ===\n", label);
     recv_count = 0;
 
-    // Init mosquitto
     mosquitto_lib_init();
     struct mosquitto *mosq = mosquitto_new(NULL, true, NULL);
-    if (!mosq) { fprintf(stderr, "Error: mosquitto_new()\n"); exit(1); }
+    if (!mosq) { perror("mosquitto_new"); exit(1); }
+
     mosquitto_message_callback_set(mosq, on_message);
     mosquitto_connect(mosq, BROKER_HOST, 1883, 60);
 
-    // Boost the subscriber thread to real-time
-#ifdef USE_RT
-    // Boost subscriber to real-time priority
-    #ifdef __QNX__
+    // Set subscriber thread scheduling policy
+    int prio = sched_get_priority_max(sched_policy);
+#ifdef __QNX__
     ThreadCtl(_NTO_TCTL_IO, NULL);
-    struct sched_param sp_qnx = { .sched_priority = 80 };
-    pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp_qnx);
-    #elif defined(__linux__)
-    struct sched_param sp_linux = { .sched_priority = 80 };
-    pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp_linux);
-    #endif
+    if (sched_policy == SCHED_SPORADIC) {
+        struct sched_param_sporadic sps = {
+            .sched_priority = prio,
+            .sched_ss_low_priority = 10,
+            .sched_ss_max_repl = 5,
+            .sched_ss_repl_period = { 0, 50000000 },
+            .sched_ss_init_budget = { 0, 5000000 }
+        };
+        pthread_setschedparam(pthread_self(), sched_policy, (struct sched_param *)&sps);
+    } else
 #endif
+    {
+        struct sched_param sp = { .sched_priority = prio };
+        if (sched_policy != SCHED_OTHER)
+            pthread_setschedparam(pthread_self(), sched_policy, &sp);
+    }
 
     mosquitto_subscribe(mosq, NULL, TOPIC, 0);
     mosquitto_loop_start(mosq);
     sleep(1);
 
-    // Throttled publishes
     for (int i = 0; i < COUNT; i++) {
         send_times[i] = now_ns();
-        mosquitto_publish(mosq, NULL, TOPIC,
-                          strlen("msg"), "msg", 0, false);
+        mosquitto_publish(mosq, NULL, TOPIC, strlen("msg"), "msg", 0, false);
         usleep(230000);
     }
 
@@ -117,19 +138,33 @@ static void run_test(const char *label) {
         total += d; min = d < min ? d : min; max = d > max ? d : max;
     }
     printf("Messages: %d\n", COUNT);
-    printf("Avg Latency: %.2f ms\n", (double)total/COUNT/1e6);
-    printf("Min Latency: %.2f ms\n", (double)min/1e6);
-    printf("Max Latency: %.2f ms\n", (double)max/1e6);
+    printf("Avg Latency: %.2f ms\n", (double)total / COUNT / 1e6);
+    printf("Min Latency: %.2f ms\n", (double)min / 1e6);
+    printf("Max Latency: %.2f ms\n", (double)max / 1e6);
 }
 
-static void start_load() {
+void start_load() {
     for (int i = 0; i < LOAD_PROCS; i++) {
         pid_t p = fork();
         if (p == 0) {
-            // Demote to low RT priority
+            int prio = 1;
+#ifdef __QNX__
             ThreadCtl(_NTO_TCTL_IO, NULL);
-            struct sched_param lp = { .sched_priority = 1 };
-            sched_setscheduler(0, SCHED_RR, &lp);
+            if (sched_policy == SCHED_SPORADIC) {
+                struct sched_param_sporadic sps = {
+                    .sched_priority = prio,
+                    .sched_ss_low_priority = 1,
+                    .sched_ss_max_repl = 1,
+                    .sched_ss_repl_period = { 0, 50000000 },
+                    .sched_ss_init_budget = { 0, 1000000 }
+                };
+                sched_setscheduler(0, sched_policy, (struct sched_param *)&sps);
+            } else
+#endif
+            {
+                struct sched_param sp = { .sched_priority = prio };
+                sched_setscheduler(0, sched_policy, &sp);
+            }
             while (1) {}
         } else {
             load_pids[i] = p;
@@ -138,15 +173,18 @@ static void start_load() {
     sleep(1);
 }
 
-static void stop_load() {
+void stop_load() {
     for (int i = 0; i < LOAD_PROCS; i++) {
         kill(load_pids[i], SIGTERM);
         waitpid(load_pids[i], NULL, 0);
     }
 }
 
-int main() {
-    // Lock memory
+int main(int argc, char *argv[]) {
+    if (argc > 1) {
+        sched_policy = parse_sched_policy(argv[1]);
+    }
+
     if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0)
         perror("mlockall failed");
 
